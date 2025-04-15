@@ -35,8 +35,8 @@ pipeline {
             steps {
                 withCredentials([azureServicePrincipal(credentialsId: AZURE_CREDENTIALS_ID)]) {
                     bat """
-                    echo "Navigating to Terraform Directory: ${TF_WORKING_DIR}"
-                    cd ${TF_WORKING_DIR}
+                    echo "Navigating to Terraform Directory: %TF_WORKING_DIR%"
+                    cd %TF_WORKING_DIR%
                     echo "Initializing Terraform..."
                     terraform init
                     """
@@ -48,8 +48,8 @@ pipeline {
             steps {
                 withCredentials([azureServicePrincipal(credentialsId: AZURE_CREDENTIALS_ID)]) {
                     bat """
-                    echo "Navigating to Terraform Directory: ${TF_WORKING_DIR}"
-                    cd ${TF_WORKING_DIR}
+                    echo "Navigating to Terraform Directory: %TF_WORKING_DIR%"
+                    cd %TF_WORKING_DIR%
                     terraform plan -out=tfplan
                     """
                 }
@@ -60,13 +60,13 @@ pipeline {
             steps {
                 withCredentials([azureServicePrincipal(credentialsId: AZURE_CREDENTIALS_ID)]) {
                     bat """
-                    echo "Navigating to Terraform Directory: ${TF_WORKING_DIR}"
-                    cd ${TF_WORKING_DIR}
+                    echo "Navigating to Terraform Directory: %TF_WORKING_DIR%"
+                    cd %TF_WORKING_DIR%
                     echo "Applying Terraform Plan..."
                     terraform apply -auto-approve tfplan || (
                         echo "Terraform apply failed, attempting to assign ACR pull role manually..."
                         az login --service-principal -u %AZURE_CLIENT_ID% -p %AZURE_CLIENT_SECRET% --tenant %AZURE_TENANT_ID%
-                        az role assignment create --assignee $(az aks show -g ${RESOURCE_GROUP} -n ${AKS_CLUSTER} --query identityProfile.kubeletidentity.objectId -o tsv) --scope $(az acr show -g ${RESOURCE_GROUP} -n ${ACR_NAME} --query id -o tsv) --role AcrPull
+                        az role assignment create --assignee $(az aks show -g %RESOURCE_GROUP% -n %AKS_CLUSTER% --query identityProfile.kubeletidentity.objectId -o tsv) --scope $(az acr show -g %RESOURCE_GROUP% -n %ACR_NAME% --query id -o tsv) --role AcrPull
                         echo "Retrying Terraform apply..."
                         terraform apply -auto-approve tfplan
                     )
@@ -79,7 +79,7 @@ pipeline {
             steps {
                 withCredentials([azureServicePrincipal(credentialsId: AZURE_CREDENTIALS_ID)]) {
                     bat """
-                    az acr login --name ${ACR_NAME} --expose-token
+                    az acr login --name %ACR_NAME% --expose-token
                     """
                 }
             }
@@ -95,7 +95,7 @@ pipeline {
             steps {
                 withCredentials([azureServicePrincipal(credentialsId: AZURE_CREDENTIALS_ID)]) {
                     bat """
-                    az aks get-credentials --resource-group ${RESOURCE_GROUP} --name ${AKS_CLUSTER} --overwrite-existing
+                    az aks get-credentials --resource-group %RESOURCE_GROUP% --name %AKS_CLUSTER% --overwrite-existing
                     """
                 }
             }
