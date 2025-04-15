@@ -34,7 +34,7 @@ pipeline {
         stage('Terraform Init') {
             steps {
                 withCredentials([azureServicePrincipal(credentialsId: env.AZURE_CREDENTIALS_ID)]) {
-                    bat ''' 
+                    bat '''
                     echo "Navigating to Terraform Directory: %TF_WORKING_DIR%"
                     cd %TF_WORKING_DIR%
                     echo "Initializing Terraform..."
@@ -59,17 +59,19 @@ pipeline {
         stage('Terraform Apply') {
             steps {
                 withCredentials([azureServicePrincipal(credentialsId: env.AZURE_CREDENTIALS_ID)]) {
-                    bat '''
-                    echo "Navigating to Terraform Directory: %TF_WORKING_DIR%"
-                    cd %TF_WORKING_DIR%
-                    echo "Applying Terraform Plan..."
-                    terraform apply -auto-approve tfplan || (
-                        echo "Terraform apply failed, attempting to assign ACR pull role manually..."
-                        az login --service-principal -u %AZURE_CLIENT_ID% -p %AZURE_CLIENT_SECRET% --tenant %AZURE_TENANT_ID%
-                        az role assignment create --assignee $(az aks show -g %RESOURCE_GROUP% -n %AKS_CLUSTER% --query identityProfile.kubeletidentity.objectId -o tsv) --scope $(az acr show -g %RESOURCE_GROUP% -n %ACR_NAME% --query id -o tsv) --role AcrPull
-                        echo "Retrying Terraform apply..."
+                    powershell '''
+                    Write-Host "Navigating to Terraform Directory: $env:TF_WORKING_DIR"
+                    cd $env:TF_WORKING_DIR
+                    Write-Host "Applying Terraform Plan..."
+                    terraform apply -auto-approve tfplan
+                    if ($LASTEXITCODE -ne 0) {
+                        Write-Host "Terraform apply failed, attempting to assign ACR pull role manually..."
+                        $aksObjectId = az aks show -g $env:RESOURCE_GROUP -n $env:AKS_CLUSTER --query identityProfile.kubeletidentity.objectId -o tsv
+                        $acrId = az acr show -g $env:RESOURCE_GROUP -n $env:ACR_NAME --query id -o tsv
+                        az role assignment create --assignee $aksObjectId --scope $acrId --role AcrPull
+                        Write-Host "Retrying Terraform apply..."
                         terraform apply -auto-approve tfplan
-                    )
+                    }
                     '''
                 }
             }
@@ -118,6 +120,9 @@ pipeline {
         }
         failure {
             echo 'Pipeline failed!'
+            script {
+                currentBuild.result = 'FAILURE'
+            }
         }
     }
 }
