@@ -24,7 +24,7 @@ variable "resource_group_name" {
 }
 
 variable "acr_name" {
-  default = "acrrathore01" 
+  default = "acryash20240415"  # Changed from acrrathore01
 }
 
 variable "aks_cluster_name" {
@@ -87,7 +87,6 @@ resource "azurerm_role_assignment" "aks_acr_pull" {
   role_definition_name = "AcrPull"
   scope                = azurerm_container_registry.acr.id
 
- 
   depends_on = [
     azurerm_kubernetes_cluster.aks
   ]
