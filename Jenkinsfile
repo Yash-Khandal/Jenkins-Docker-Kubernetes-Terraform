@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     environment {
-        ACR_NAME = 'acryash20240415'  // Changed to match your Terraform ACR name
+        ACR_NAME = 'acryash20240415'
         AZURE_CREDENTIALS_ID = 'azure-credentials'
         ACR_LOGIN_SERVER = "${ACR_NAME}.azurecr.io"
         IMAGE_NAME = 'webapidocker1'
@@ -115,11 +115,9 @@ pipeline {
         }
         success {
             echo 'Pipeline completed successfully!'
-            slackSend color: 'good', message: "Pipeline SUCCESS: ${env.JOB_NAME} #${env.BUILD_NUMBER}"
         }
         failure {
             echo 'Pipeline failed!'
-            slackSend color: 'danger', message: "Pipeline FAILED: ${env.JOB_NAME} #${env.BUILD_NUMBER}"
         }
     }
 }
