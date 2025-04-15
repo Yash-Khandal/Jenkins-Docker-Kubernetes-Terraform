@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         ACR_NAME = 'acryash20240415'
-        AZURE_CREDENTIALS_ID = 'azure-credentials'
+        AZURE_CREDENTIALS_ID = 'azure-jenkins'
         ACR_LOGIN_SERVER = "${ACR_NAME}.azurecr.io"
         IMAGE_NAME = 'webapidocker1'
         IMAGE_TAG = 'latest'
