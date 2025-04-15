@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     environment {
-        ACR_NAME = 'acryash01'
+        ACR_NAME = 'acryash20240415'  // Changed to match your Terraform ACR name
         AZURE_CREDENTIALS_ID = 'azure-credentials'
         ACR_LOGIN_SERVER = "${ACR_NAME}.azurecr.io"
         IMAGE_NAME = 'webapidocker1'
@@ -27,16 +27,16 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                bat "docker build -t %ACR_LOGIN_SERVER%/%IMAGE_NAME%:%IMAGE_TAG% -f WebApiJenkins/Dockerfile WebApiJenkins"
+                bat "docker build -t ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${IMAGE_TAG} -f WebApiJenkins/Dockerfile WebApiJenkins"
             }
         }
 
-       stage('Terraform Init') {
+        stage('Terraform Init') {
             steps {
                 withCredentials([azureServicePrincipal(credentialsId: AZURE_CREDENTIALS_ID)]) {
                     bat """
-                    echo "Navigating to Terraform Directory: %TF_WORKING_DIR%"
-                    cd %TF_WORKING_DIR%
+                    echo "Navigating to Terraform Directory: ${TF_WORKING_DIR}"
+                    cd ${TF_WORKING_DIR}
                     echo "Initializing Terraform..."
                     terraform init
                     """
@@ -45,45 +45,59 @@ pipeline {
         }
 
         stage('Terraform Plan') {
-    steps {
-        withCredentials([azureServicePrincipal(credentialsId: AZURE_CREDENTIALS_ID)]) {
-            bat """
-            echo "Navigating to Terraform Directory: %TF_WORKING_DIR%"
-            cd %TF_WORKING_DIR%
-            terraform plan -out=tfplan
-            """
+            steps {
+                withCredentials([azureServicePrincipal(credentialsId: AZURE_CREDENTIALS_ID)]) {
+                    bat """
+                    echo "Navigating to Terraform Directory: ${TF_WORKING_DIR}"
+                    cd ${TF_WORKING_DIR}
+                    terraform plan -out=tfplan
+                    """
+                }
+            }
         }
-    }
-}
-
 
         stage('Terraform Apply') {
-    steps {
-        withCredentials([azureServicePrincipal(credentialsId: AZURE_CREDENTIALS_ID)]) {
-            bat """
-            echo "Navigating to Terraform Directory: %TF_WORKING_DIR%"
-            cd %TF_WORKING_DIR%
-            echo "Applying Terraform Plan..."
-            terraform apply -auto-approve tfplan
-            """
+            steps {
+                withCredentials([azureServicePrincipal(credentialsId: AZURE_CREDENTIALS_ID)]) {
+                    bat """
+                    echo "Navigating to Terraform Directory: ${TF_WORKING_DIR}"
+                    cd ${TF_WORKING_DIR}
+                    echo "Applying Terraform Plan..."
+                    terraform apply -auto-approve tfplan || (
+                        echo "Terraform apply failed, attempting to assign ACR pull role manually..."
+                        az login --service-principal -u %AZURE_CLIENT_ID% -p %AZURE_CLIENT_SECRET% --tenant %AZURE_TENANT_ID%
+                        az role assignment create --assignee $(az aks show -g ${RESOURCE_GROUP} -n ${AKS_CLUSTER} --query identityProfile.kubeletidentity.objectId -o tsv) --scope $(az acr show -g ${RESOURCE_GROUP} -n ${ACR_NAME} --query id -o tsv) --role AcrPull
+                        echo "Retrying Terraform apply..."
+                        terraform apply -auto-approve tfplan
+                    )
+                    """
+                }
+            }
         }
-    }
-}
+
         stage('Login to ACR') {
             steps {
-                bat "az acr login --name %ACR_NAME%"
+                withCredentials([azureServicePrincipal(credentialsId: AZURE_CREDENTIALS_ID)]) {
+                    bat """
+                    az acr login --name ${ACR_NAME} --expose-token
+                    """
+                }
             }
         }
 
         stage('Push Docker Image to ACR') {
             steps {
-                bat "docker push %ACR_LOGIN_SERVER%/%IMAGE_NAME%:%IMAGE_TAG%"
+                bat "docker push ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${IMAGE_TAG}"
             }
         }
 
         stage('Get AKS Credentials') {
             steps {
-                bat "az aks get-credentials --resource-group %RESOURCE_GROUP% --name %AKS_CLUSTER% --overwrite-existing"
+                withCredentials([azureServicePrincipal(credentialsId: AZURE_CREDENTIALS_ID)]) {
+                    bat """
+                    az aks get-credentials --resource-group ${RESOURCE_GROUP} --name ${AKS_CLUSTER} --overwrite-existing
+                    """
+                }
             }
         }
 
@@ -95,11 +109,17 @@ pipeline {
     }
 
     post {
+        always {
+            echo 'Cleaning up workspace...'
+            cleanWs()
+        }
         success {
-            echo 'All stages completed successfully!'
+            echo 'Pipeline completed successfully!'
+            slackSend color: 'good', message: "Pipeline SUCCESS: ${env.JOB_NAME} #${env.BUILD_NUMBER}"
         }
         failure {
-            echo 'Build failed.'
+            echo 'Pipeline failed!'
+            slackSend color: 'danger', message: "Pipeline FAILED: ${env.JOB_NAME} #${env.BUILD_NUMBER}"
         }
     }
 }
