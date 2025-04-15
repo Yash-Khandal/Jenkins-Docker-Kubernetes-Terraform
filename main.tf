@@ -11,10 +11,11 @@ terraform {
 provider "azurerm" {
   subscription_id = "6c1e198f-37fe-4942-b348-c597e7bef44b"
   tenant_id       = "341f4047-ffad-4c4a-a0e7-b86c7963832b"
+  client_id       = "4cc4e731-d820-406c-831c-998643733aa3"
+  client_secret   = "C6t8Q~VxVt-35pzGG1RhWTmhCLoHIWiP6rh6capS"
   features {}
 }
 
-# Variables
 variable "location" {
   default = "East US"
 }
@@ -24,7 +25,7 @@ variable "resource_group_name" {
 }
 
 variable "acr_name" {
-  default = "acryash20240415"  # Changed from acrrathore01
+  default = "acryash20240415"
 }
 
 variable "aks_cluster_name" {
@@ -39,13 +40,11 @@ variable "node_count" {
   default = 2
 }
 
-# Resource Group
 resource "azurerm_resource_group" "rg" {
   name     = var.resource_group_name
   location = var.location
 }
 
-# Azure Container Registry (ACR)
 resource "azurerm_container_registry" "acr" {
   name                = var.acr_name
   resource_group_name = azurerm_resource_group.rg.name
@@ -54,7 +53,6 @@ resource "azurerm_container_registry" "acr" {
   admin_enabled       = true
 }
 
-# Azure Kubernetes Service (AKS)
 resource "azurerm_kubernetes_cluster" "aks" {
   name                = var.aks_cluster_name
   location            = azurerm_resource_group.rg.location
@@ -81,7 +79,6 @@ resource "azurerm_kubernetes_cluster" "aks" {
   }
 }
 
-# Role assignment to allow AKS to pull from ACR
 resource "azurerm_role_assignment" "aks_acr_pull" {
   principal_id         = azurerm_kubernetes_cluster.aks.kubelet_identity[0].object_id
   role_definition_name = "AcrPull"
@@ -92,7 +89,6 @@ resource "azurerm_role_assignment" "aks_acr_pull" {
   ]
 }
 
-# Outputs
 output "resource_group_name" {
   value = azurerm_resource_group.rg.name
 }
