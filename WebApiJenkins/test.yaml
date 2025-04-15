@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: dotnet-api
-          image: acrrathore01.azurecr.io/webapidocker1:latest
+          image: acryash20240415.azurecr.io/webapidocker1:latest
           ports:
             - containerPort: 8080
 ---
