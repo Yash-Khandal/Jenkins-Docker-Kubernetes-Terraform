@@ -50,7 +50,7 @@ pipeline {
                     bat '''
                     echo "Navigating to Terraform Directory: %TF_WORKING_DIR%"
                     cd %TF_WORKING_DIR%
-                    terraform plan -out=tfplan
+                    terraform plan -out=tfplan -input=false
                     '''
                 }
             }
@@ -59,20 +59,45 @@ pipeline {
         stage('Terraform Apply') {
             steps {
                 withCredentials([azureServicePrincipal(credentialsId: env.AZURE_CREDENTIALS_ID)]) {
-                    powershell '''
-                    Write-Host "Navigating to Terraform Directory: $env:TF_WORKING_DIR"
-                    cd $env:TF_WORKING_DIR
-                    Write-Host "Applying Terraform Plan..."
-                    terraform apply -auto-approve tfplan
-                    if ($LASTEXITCODE -ne 0) {
-                        Write-Host "Terraform apply failed, attempting to assign ACR pull role manually..."
-                        $aksObjectId = az aks show -g $env:RESOURCE_GROUP -n $env:AKS_CLUSTER --query identityProfile.kubeletidentity.objectId -o tsv
-                        $acrId = az acr show -g $env:RESOURCE_GROUP -n $env:ACR_NAME --query id -o tsv
-                        az role assignment create --assignee $aksObjectId --scope $acrId --role AcrPull
-                        Write-Host "Retrying Terraform apply..."
-                        terraform apply -auto-approve tfplan
+                    script {
+                        try {
+                            bat '''
+                            echo "Navigating to Terraform Directory: %TF_WORKING_DIR%"
+                            cd %TF_WORKING_DIR%
+                            echo "Applying Terraform Plan..."
+                            terraform apply -auto-approve -input=false tfplan
+                            '''
+                        } catch (Exception e) {
+                            echo "Terraform apply failed, attempting to import existing resources..."
+                            bat '''
+                            cd %TF_WORKING_DIR%
+                            terraform import azurerm_resource_group.rg /subscriptions/%AZURE_SUBSCRIPTION_ID%/resourceGroups/%RESOURCE_GROUP%
+                            terraform apply -auto-approve -input=false tfplan
+                            '''
+                        }
                     }
-                    '''
+                }
+            }
+        }
+
+        stage('Assign ACR Pull Role') {
+            steps {
+                withCredentials([azureServicePrincipal(credentialsId: env.AZURE_CREDENTIALS_ID)]) {
+                    script {
+                        try {
+                            bat '''
+                            echo "Assigning ACR Pull role to AKS..."
+                            az login --service-principal -u %AZURE_CLIENT_ID% -p %AZURE_CLIENT_SECRET% --tenant %AZURE_TENANT_ID%
+                            az role assignment create --assignee $(az aks show -g %RESOURCE_GROUP% -n %AKS_CLUSTER% --query identityProfile.kubeletidentity.objectId -o tsv) --scope $(az acr show -g %RESOURCE_GROUP% -n %ACR_NAME% --query id -o tsv) --role AcrPull
+                            '''
+                        } catch (Exception e) {
+                            echo "Failed to assign ACR Pull role automatically"
+                            echo "Please assign this role manually in Azure Portal:"
+                            echo "1. Go to your ACR resource"
+                            echo "2. Navigate to Access Control (IAM)"
+                            echo "3. Add role assignment: AcrPull to your AKS cluster's managed identity"
+                        }
+                    }
                 }
             }
         }
