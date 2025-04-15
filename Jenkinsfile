@@ -35,11 +35,28 @@ pipeline {
             steps {
                 withCredentials([azureServicePrincipal(credentialsId: env.AZURE_CREDENTIALS_ID)]) {
                     bat '''
-                    echo "Navigating to Terraform Directory: %TF_WORKING_DIR%"
-                    cd %TF_WORKING_DIR%
                     echo "Initializing Terraform..."
+                    cd %TF_WORKING_DIR%
                     terraform init
                     '''
+                }
+            }
+        }
+
+        stage('Terraform Import Existing Resources') {
+            steps {
+                withCredentials([azureServicePrincipal(credentialsId: env.AZURE_CREDENTIALS_ID)]) {
+                    script {
+                        try {
+                            bat '''
+                            cd %TF_WORKING_DIR%
+                            echo "Importing existing resource group..."
+                            terraform import azurerm_resource_group.rg /subscriptions/%AZURE_SUBSCRIPTION_ID%/resourceGroups/%RESOURCE_GROUP%
+                            '''
+                        } catch (Exception e) {
+                            echo "Resource group import failed (may not exist yet)"
+                        }
+                    }
                 }
             }
         }
@@ -48,8 +65,8 @@ pipeline {
             steps {
                 withCredentials([azureServicePrincipal(credentialsId: env.AZURE_CREDENTIALS_ID)]) {
                     bat '''
-                    echo "Navigating to Terraform Directory: %TF_WORKING_DIR%"
                     cd %TF_WORKING_DIR%
+                    echo "Creating Terraform plan..."
                     terraform plan -out=tfplan -input=false
                     '''
                 }
@@ -62,16 +79,15 @@ pipeline {
                     script {
                         try {
                             bat '''
-                            echo "Navigating to Terraform Directory: %TF_WORKING_DIR%"
                             cd %TF_WORKING_DIR%
-                            echo "Applying Terraform Plan..."
+                            echo "Applying Terraform plan..."
                             terraform apply -auto-approve -input=false tfplan
                             '''
                         } catch (Exception e) {
-                            echo "Terraform apply failed, attempting to import existing resources..."
+                            echo "Plan application failed, creating new plan..."
                             bat '''
                             cd %TF_WORKING_DIR%
-                            terraform import azurerm_resource_group.rg /subscriptions/%AZURE_SUBSCRIPTION_ID%/resourceGroups/%RESOURCE_GROUP%
+                            terraform plan -out=tfplan -input=false
                             terraform apply -auto-approve -input=false tfplan
                             '''
                         }
@@ -86,16 +102,19 @@ pipeline {
                     script {
                         try {
                             bat '''
-                            echo "Assigning ACR Pull role to AKS..."
-                            az login --service-principal -u %AZURE_CLIENT_ID% -p %AZURE_CLIENT_SECRET% --tenant %AZURE_TENANT_ID%
-                            az role assignment create --assignee $(az aks show -g %RESOURCE_GROUP% -n %AKS_CLUSTER% --query identityProfile.kubeletidentity.objectId -o tsv) --scope $(az acr show -g %RESOURCE_GROUP% -n %ACR_NAME% --query id -o tsv) --role AcrPull
+                            cd %TF_WORKING_DIR%
+                            echo "Assigning ACR Pull role..."
+                            $aksObjectId = $(az aks show -g %RESOURCE_GROUP% -n %AKS_CLUSTER% --query identityProfile.kubeletidentity.objectId -o tsv)
+                            $acrId = $(az acr show -g %RESOURCE_GROUP% -n %ACR_NAME% --query id -o tsv)
+                            az role assignment create --assignee $aksObjectId --scope $acrId --role AcrPull
                             '''
                         } catch (Exception e) {
-                            echo "Failed to assign ACR Pull role automatically"
-                            echo "Please assign this role manually in Azure Portal:"
-                            echo "1. Go to your ACR resource"
-                            echo "2. Navigate to Access Control (IAM)"
-                            echo "3. Add role assignment: AcrPull to your AKS cluster's managed identity"
+                            echo "ACR role assignment failed. Please assign manually:"
+                            echo "1. Go to Azure Portal"
+                            echo "2. Navigate to your ACR"
+                            echo "3. Access Control (IAM)"
+                            echo "4. Add Role Assignment: AcrPull"
+                            echo "5. Assign to your AKS cluster's managed identity"
                         }
                     }
                 }
