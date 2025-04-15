@@ -43,7 +43,7 @@ pipeline {
             }
         }
 
-        stage('Terraform Import Existing Resources') {
+        stage('Import Existing Resources') {
             steps {
                 withCredentials([azureServicePrincipal(credentialsId: env.AZURE_CREDENTIALS_ID)]) {
                     script {
@@ -55,6 +55,26 @@ pipeline {
                             '''
                         } catch (Exception e) {
                             echo "Resource group import failed (may not exist yet)"
+                        }
+                        
+                        try {
+                            bat '''
+                            cd %TF_WORKING_DIR%
+                            echo "Importing existing ACR..."
+                            terraform import azurerm_container_registry.acr /subscriptions/%AZURE_SUBSCRIPTION_ID%/resourceGroups/%RESOURCE_GROUP%/providers/Microsoft.ContainerRegistry/registries/%ACR_NAME%
+                            '''
+                        } catch (Exception e) {
+                            echo "ACR import failed (may not exist yet)"
+                        }
+                        
+                        try {
+                            bat '''
+                            cd %TF_WORKING_DIR%
+                            echo "Importing existing AKS cluster..."
+                            terraform import azurerm_kubernetes_cluster.aks /subscriptions/%AZURE_SUBSCRIPTION_ID%/resourceGroups/%RESOURCE_GROUP%/providers/Microsoft.ContainerService/managedClusters/%AKS_CLUSTER%
+                            '''
+                        } catch (Exception e) {
+                            echo "AKS cluster import failed (may not exist yet)"
                         }
                     }
                 }
@@ -76,22 +96,11 @@ pipeline {
         stage('Terraform Apply') {
             steps {
                 withCredentials([azureServicePrincipal(credentialsId: env.AZURE_CREDENTIALS_ID)]) {
-                    script {
-                        try {
-                            bat '''
-                            cd %TF_WORKING_DIR%
-                            echo "Applying Terraform plan..."
-                            terraform apply -auto-approve -input=false tfplan
-                            '''
-                        } catch (Exception e) {
-                            echo "Plan application failed, creating new plan..."
-                            bat '''
-                            cd %TF_WORKING_DIR%
-                            terraform plan -out=tfplan -input=false
-                            terraform apply -auto-approve -input=false tfplan
-                            '''
-                        }
-                    }
+                    bat '''
+                    cd %TF_WORKING_DIR%
+                    echo "Applying Terraform plan..."
+                    terraform apply -auto-approve -input=false tfplan
+                    '''
                 }
             }
         }
@@ -99,24 +108,12 @@ pipeline {
         stage('Assign ACR Pull Role') {
             steps {
                 withCredentials([azureServicePrincipal(credentialsId: env.AZURE_CREDENTIALS_ID)]) {
-                    script {
-                        try {
-                            bat '''
-                            cd %TF_WORKING_DIR%
-                            echo "Assigning ACR Pull role..."
-                            $aksObjectId = $(az aks show -g %RESOURCE_GROUP% -n %AKS_CLUSTER% --query identityProfile.kubeletidentity.objectId -o tsv)
-                            $acrId = $(az acr show -g %RESOURCE_GROUP% -n %ACR_NAME% --query id -o tsv)
-                            az role assignment create --assignee $aksObjectId --scope $acrId --role AcrPull
-                            '''
-                        } catch (Exception e) {
-                            echo "ACR role assignment failed. Please assign manually:"
-                            echo "1. Go to Azure Portal"
-                            echo "2. Navigate to your ACR"
-                            echo "3. Access Control (IAM)"
-                            echo "4. Add Role Assignment: AcrPull"
-                            echo "5. Assign to your AKS cluster's managed identity"
-                        }
-                    }
+                    powershell '''
+                    Write-Host "Assigning ACR Pull role..."
+                    $aksObjectId = $(az aks show -g $env:RESOURCE_GROUP -n $env:AKS_CLUSTER --query identityProfile.kubeletidentity.objectId -o tsv)
+                    $acrId = $(az acr show -g $env:RESOURCE_GROUP -n $env:ACR_NAME --query id -o tsv)
+                    az role assignment create --assignee $aksObjectId --scope $acrId --role AcrPull
+                    '''
                 }
             }
         }
