@@ -33,33 +33,33 @@ pipeline {
 
         stage('Terraform Init') {
             steps {
-                withCredentials([azureServicePrincipal(credentialsId: AZURE_CREDENTIALS_ID)]) {
-                    bat """
+                withCredentials([azureServicePrincipal(credentialsId: env.AZURE_CREDENTIALS_ID)]) {
+                    bat ''' 
                     echo "Navigating to Terraform Directory: %TF_WORKING_DIR%"
                     cd %TF_WORKING_DIR%
                     echo "Initializing Terraform..."
                     terraform init
-                    """
+                    '''
                 }
             }
         }
 
         stage('Terraform Plan') {
             steps {
-                withCredentials([azureServicePrincipal(credentialsId: AZURE_CREDENTIALS_ID)]) {
-                    bat """
+                withCredentials([azureServicePrincipal(credentialsId: env.AZURE_CREDENTIALS_ID)]) {
+                    bat '''
                     echo "Navigating to Terraform Directory: %TF_WORKING_DIR%"
                     cd %TF_WORKING_DIR%
                     terraform plan -out=tfplan
-                    """
+                    '''
                 }
             }
         }
 
         stage('Terraform Apply') {
             steps {
-                withCredentials([azureServicePrincipal(credentialsId: AZURE_CREDENTIALS_ID)]) {
-                    bat """
+                withCredentials([azureServicePrincipal(credentialsId: env.AZURE_CREDENTIALS_ID)]) {
+                    bat '''
                     echo "Navigating to Terraform Directory: %TF_WORKING_DIR%"
                     cd %TF_WORKING_DIR%
                     echo "Applying Terraform Plan..."
@@ -70,17 +70,17 @@ pipeline {
                         echo "Retrying Terraform apply..."
                         terraform apply -auto-approve tfplan
                     )
-                    """
+                    '''
                 }
             }
         }
 
         stage('Login to ACR') {
             steps {
-                withCredentials([azureServicePrincipal(credentialsId: AZURE_CREDENTIALS_ID)]) {
-                    bat """
+                withCredentials([azureServicePrincipal(credentialsId: env.AZURE_CREDENTIALS_ID)]) {
+                    bat '''
                     az acr login --name %ACR_NAME% --expose-token
-                    """
+                    '''
                 }
             }
         }
@@ -93,17 +93,17 @@ pipeline {
 
         stage('Get AKS Credentials') {
             steps {
-                withCredentials([azureServicePrincipal(credentialsId: AZURE_CREDENTIALS_ID)]) {
-                    bat """
+                withCredentials([azureServicePrincipal(credentialsId: env.AZURE_CREDENTIALS_ID)]) {
+                    bat '''
                     az aks get-credentials --resource-group %RESOURCE_GROUP% --name %AKS_CLUSTER% --overwrite-existing
-                    """
+                    '''
                 }
             }
         }
 
         stage('Deploy to AKS') {
             steps {
-                bat "kubectl apply -f WebApiJenkins/test.yaml"
+                bat 'kubectl apply -f WebApiJenkins/test.yaml'
             }
         }
     }
