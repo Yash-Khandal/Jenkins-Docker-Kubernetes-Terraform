@@ -35,48 +35,9 @@ pipeline {
             steps {
                 withCredentials([azureServicePrincipal(credentialsId: env.AZURE_CREDENTIALS_ID)]) {
                     bat '''
-                    echo "Initializing Terraform..."
                     cd %TF_WORKING_DIR%
                     terraform init
                     '''
-                }
-            }
-        }
-
-        stage('Import Existing Resources') {
-            steps {
-                withCredentials([azureServicePrincipal(credentialsId: env.AZURE_CREDENTIALS_ID)]) {
-                    script {
-                        try {
-                            bat '''
-                            cd %TF_WORKING_DIR%
-                            echo "Importing existing resource group..."
-                            terraform import azurerm_resource_group.rg /subscriptions/%AZURE_SUBSCRIPTION_ID%/resourceGroups/%RESOURCE_GROUP%
-                            '''
-                        } catch (Exception e) {
-                            echo "Resource group import failed (may not exist yet)"
-                        }
-                        
-                        try {
-                            bat '''
-                            cd %TF_WORKING_DIR%
-                            echo "Importing existing ACR..."
-                            terraform import azurerm_container_registry.acr /subscriptions/%AZURE_SUBSCRIPTION_ID%/resourceGroups/%RESOURCE_GROUP%/providers/Microsoft.ContainerRegistry/registries/%ACR_NAME%
-                            '''
-                        } catch (Exception e) {
-                            echo "ACR import failed (may not exist yet)"
-                        }
-                        
-                        try {
-                            bat '''
-                            cd %TF_WORKING_DIR%
-                            echo "Importing existing AKS cluster..."
-                            terraform import azurerm_kubernetes_cluster.aks /subscriptions/%AZURE_SUBSCRIPTION_ID%/resourceGroups/%RESOURCE_GROUP%/providers/Microsoft.ContainerService/managedClusters/%AKS_CLUSTER%
-                            '''
-                        } catch (Exception e) {
-                            echo "AKS cluster import failed (may not exist yet)"
-                        }
-                    }
                 }
             }
         }
@@ -86,7 +47,6 @@ pipeline {
                 withCredentials([azureServicePrincipal(credentialsId: env.AZURE_CREDENTIALS_ID)]) {
                     bat '''
                     cd %TF_WORKING_DIR%
-                    echo "Creating Terraform plan..."
                     terraform plan -out=tfplan -input=false
                     '''
                 }
@@ -96,24 +56,53 @@ pipeline {
         stage('Terraform Apply') {
             steps {
                 withCredentials([azureServicePrincipal(credentialsId: env.AZURE_CREDENTIALS_ID)]) {
-                    bat '''
-                    cd %TF_WORKING_DIR%
-                    echo "Applying Terraform plan..."
-                    terraform apply -auto-approve -input=false tfplan
-                    '''
-                }
-            }
-        }
-
-        stage('Assign ACR Pull Role') {
-            steps {
-                withCredentials([azureServicePrincipal(credentialsId: env.AZURE_CREDENTIALS_ID)]) {
-                    powershell '''
-                    Write-Host "Assigning ACR Pull role..."
-                    $aksObjectId = $(az aks show -g $env:RESOURCE_GROUP -n $env:AKS_CLUSTER --query identityProfile.kubeletidentity.objectId -o tsv)
-                    $acrId = $(az acr show -g $env:RESOURCE_GROUP -n $env:ACR_NAME --query id -o tsv)
-                    az role assignment create --assignee $aksObjectId --scope $acrId --role AcrPull
-                    '''
+                    script {
+                        // First try normal apply
+                        def applyExitCode = bat(
+                            script: '''
+                            cd %TF_WORKING_DIR%
+                            terraform apply -auto-approve -input=false tfplan
+                            ''',
+                            returnStatus: true
+                        )
+                        
+                        // If failed due to role assignment, do manual assignment
+                        if (applyExitCode != 0) {
+                            echo "Terraform apply failed, attempting manual role assignment..."
+                            
+                            // Get AKS object ID and ACR ID
+                            def aksObjectId = bat(
+                                script: '''
+                                az aks show -g %RESOURCE_GROUP% -n %AKS_CLUSTER% --query identityProfile.kubeletidentity.objectId -o tsv
+                                ''',
+                                returnStdout: true
+                            ).trim()
+                            
+                            def acrId = bat(
+                                script: '''
+                                az acr show -g %RESOURCE_GROUP% -n %ACR_NAME% --query id -o tsv
+                                ''',
+                                returnStdout: true
+                            ).trim()
+                            
+                            // Try to assign role (may still fail if no permissions)
+                            bat """
+                            az role assignment create --assignee ${aksObjectId} --scope ${acrId} --role AcrPull || (
+                                echo "WARNING: Failed to assign ACR Pull role automatically"
+                                echo "Please assign this role manually in Azure Portal:"
+                                echo "1. Go to your ACR resource"
+                                echo "2. Navigate to Access Control (IAM)"
+                                echo "3. Add role assignment: AcrPull to your AKS cluster's managed identity"
+                            )
+                            """
+                            
+                            // Retry Terraform apply
+                            bat '''
+                            cd %TF_WORKING_DIR%
+                            terraform apply -auto-approve -input=false tfplan
+                            '''
+                        }
+                    }
                 }
             }
         }
@@ -153,17 +142,10 @@ pipeline {
 
     post {
         always {
-            echo 'Cleaning up workspace...'
             cleanWs()
         }
-        success {
-            echo 'Pipeline completed successfully!'
-        }
         failure {
-            echo 'Pipeline failed!'
-            script {
-                currentBuild.result = 'FAILURE'
-            }
+            echo "Pipeline failed! Check above for errors."
         }
     }
 }
